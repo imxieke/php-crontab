@@ -1,0 +1,70 @@
+#!/usr/bin/env php
+<?php
+/*
+ * @Author: Cloudflying
+ * @Date: 2022-06-05 18:01:17
+ * @LastEditTime: 2022-06-05 23:58:05
+ * @LastEditors: Cloudflying
+ * @Description: 
+ * @FilePath: /php-crontab/crontab
+ */
+
+use Workerman\Worker;
+require __DIR__ . '/vendor/autoload.php';
+
+use Workerman\Crontab\Crontab;
+use Workerman\Crontab\Parser;
+$worker = new Worker();
+$worker->name = 'PHP Crontab';
+// 输出在终端
+$worker::$stdoutFile = __DIR__ . '/runtime/crontab_stdout.log';
+// 错误等 Workerman 日志
+$worker::$logFile = __DIR__ . '/runtime/crontab.log';
+$worker::$pidFile = __DIR__ . '/runtime/crontab.pid';
+// 设置实例的运行用户 可选项 必须具有 root 权限
+// $worker->user = 'www-data';
+$worker->user = 'imxieke';
+
+$cron_lists = explode("\n",file_get_contents(__DIR__ . '/crontab.ini'));
+
+$crons = [];
+foreach ($cron_lists as $key => $cron) {
+    $cron = trim($cron);
+    // 清除空格键
+    $cron = str_replace([' ','  ','   ','    ','    '],' ', $cron);
+    if (strlen(trim($cron)) != '') {
+        $crontab_express = explode(' ',$cron);
+        $crontab_express_time = '';
+        // 重组 crontab 表达式
+        for ($i=0; $i < 6; $i++) { $crontab_express_time = $crontab_express_time . $crontab_express[$i] . ' ';}
+        // 重组 crontab 需要运行的程序
+        for ($i=0; $i < 6 ; $i++) { unset($crontab_express[$i]);}
+        $crontab_express_task = implode(' ',$crontab_express);
+        if((new Parser)->isValid($crontab_express_time)){
+            // echo "表达式正确: " . $crontab_express_time . PHP_EOL;
+            $crons[$key]['time'] = $crontab_express_time;
+            $crons[$key]['task'] = $crontab_express_task;
+        }else
+        {
+            echo "表达式错误: " . $crontab_express_time  . PHP_EOL;
+            throw new Exception("Invalid crontab expression: " . $crontab_express_time . ' ' .  $crontab_express_task . "\n");
+        }
+    }
+}
+
+$worker->count = count($crons);
+
+$worker->onWorkerStart = function ($worker) use ($crons) {
+    // Execute the function in the first second of every minute.
+    foreach ($crons as $ckey => $cron)
+    {
+        if ($ckey == $worker->id) {
+            new Crontab($cron['time'], function () use ($cron,$worker,$ckey) {
+                echo date('Y-m-d H:i:s') . "Task ID: " . $ckey . ' Worker ID: ' . $worker->id . ' 执行任务: ' . $cron['task'] . PHP_EOL;
+                echo shell_exec($cron['task']);
+            });
+        }
+    }
+};
+
+Worker::runAll();
